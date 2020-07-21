@@ -51,7 +51,7 @@ The output file (`--output_story_file`) will contain the same columns as above, 
 - the full story (column name: `--story_column` or `story_id`)
 - For each history size, the average (e.g., `xent_avg_hist-1`) and standard deviation (e.g., `xent_std_hist-1`) of the log probability of the sentences in the story (`text_xents_hist-1`).
 
-## Running the analysis script
+## Step 2: Running the analysis script
 _coming soon_
 
 ## Reference
