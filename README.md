@@ -12,7 +12,7 @@
 ## Notes
 Script should be able to extract a bunch of linearity scores and export them to a file (csv? or pkl?)
 And compare against categories?
-
+math test: $$h_i$$
 
 ## Reference
 Maarten Sap, Eric Horvitz, Yejin Choi, Noah A Smith & James W Pennebaker (2020).
