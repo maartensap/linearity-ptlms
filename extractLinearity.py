@@ -18,6 +18,11 @@ except:
   pass
 
 MAX_SEQ_LEN = 512
+DEFAULT_STORY_ID_COL = "story_id"
+DEFAULT_STORY_ID_VALUE = "doc0"
+FEAT_COLS = ['text_xents', 'text_probs', 'perTextTokenLogPs',
+             'xent_avg', 'xent_std']
+SENT_FEAT_COLS = ['text_xents', 'text_probs', 'perTextTokenLogPs']
 
 np.random.seed(seed=56)
 
@@ -56,17 +61,13 @@ def _computePplxInContext(tokens,index,model,tok,max_seq_len=MAX_SEQ_LEN):
     
   with torch.no_grad():
     input_ids = torch.tensor([tokens])
-    # try:
-    out = model(input_ids)#,labels=input_ids)
-    # except RuntimeError as e:
-    #   embed();exit()
+    out = model(input_ids)
+    logits = out[0]
     
-    if isinstance(model,OpenAIGPTLMHeadModel) or isinstance(model,GPT2LMHeadModel):
-      logits = out[0]
-    elif isinstance(model,TransfoXLLMHeadModel):
-      logits = out[0]
-      
     assert logits.shape[:2] == input_ids.shape
+    assert logits.shape[-1] == model.config.vocab_size
+         
+
     # only taking the probs after index
     logits = logits[0,max(index-1,0):-1,:]
     sm = logits.log_softmax(dim=-1)
@@ -90,13 +91,6 @@ def computePplxInContext(df,tok,model,story_col="story",context_col="summary",
   context: text to be prepended to every sentence.
   hist_size: how far back does history go? If -1, it goes back all the way.
   """
-  if sent_col not in df:
-    tqdm.pandas(desc="Tokenizing into sentences",ascii=True)
-    df[sent_col] = df[story_col].progress_apply(
-      lambda t: betterSentTokenization(t,tok.encode))
-  else:
-    print("Data already split into sentences.")
-  print(df[sent_col].apply(len).describe())
 
   if context_col == "firstSent":
     df[context_col] = df[sent_col].apply(lambda x: x[0])
@@ -142,12 +136,12 @@ def computePplxInContext(df,tok,model,story_col="story",context_col="summary",
   def reMergeXents(c):
     return pd.Series({
       "text_xents": c["text_xent"].tolist(),
-      "text_probss": c["text_prob"].tolist(),
+      "text_probs": c["text_prob"].tolist(),
       "perTextTokenLogPs": c["perTextTokenLogP"].tolist(),
       "xent_avg": c["text_xent"].mean(),
       "xent_std": c["text_xent"].std(),
     })
-    
+  
   data.index.names = ["doc_ix","sent_ix"]
   # data.reset_index(level=1,inplace=True)
   feats = data.groupby(level=0).apply(reMergeXents)
@@ -166,7 +160,7 @@ def loadInput(args):
       df = pd.read_csv(args.input_story_file)
     elif args.input_story_file.endswith(".pkl"):
       df = pd.read_pickle(args.input_story_file)
-    elif args.input_sentence_file.endswith(".txt"):
+    elif args.input_story_file.endswith(".txt"):
       lines = [l.strip() for l in open(args.input_story_file)]
       s = pd.Series(data=lines)
       s.name = args.story_column
@@ -178,15 +172,24 @@ def loadInput(args):
     
   elif args.input_sentence_file:
     if args.input_sentence_file.endswith(".csv"):
-      df = pd.read_csv(args.input_sentence_file)
+      sent_df = pd.read_csv(args.input_sentence_file)
     elif args.input_sentence_file.endswith(".pkl"):
-      df = pd.read_pickle(args.input_story_file)
+      sent_df = pd.read_pickle(args.input_story_file)
     elif args.input_sentence_file.endswith(".txt"):
       lines = [l.strip() for l in open(args.input_sentence_file)]
       s = pd.Series(data=lines)
       s.name = args.sentence_column
-      df = s.to_frame()
-    log.info(f"Found {len(df)} sentences.")
+      sent_df = s.to_frame()
+      
+    log.info(f"Found {len(sent_df)} sentences.")
+    if not args.story_id_column in sent_df:
+      sent_df[args.story_id_column] = DEFAULT_STORY_ID_VALUE
+      
+    # turn into a one story Dataframe
+    df = sent_df.groupby(args.story_id_column,as_index=False).agg(
+      {args.sentence_column:list})
+    df[args.story_column] = df[args.sentence_column].apply(" ".join)
+    
   else:
     raise ValueError("Please provide one of --input_story_file or --input_sentence_file")
 
@@ -194,19 +197,53 @@ def loadInput(args):
     df = df.sample(args.debug)
     log.info(f"[DEBUG] Sampling {args.debug} datapoints.")
     
+  if not args.context_column:
+    args.context_column = "summary"
+    df[args.context_column] = ""
+    
   return df
+
+def saveOutput(df,fn,inst="stories"):
+  if fn.endswith(".pkl"):
+    df.to_pickle(fn)
+  elif fn.endswith(".csv"):
+    listsOrDicts = df.apply(lambda c: c.apply(
+      lambda x: isinstance(x,list) or  isinstance(x,dict)).all())
+    for c in df.columns[listsOrDicts]:
+      df[c] = df[c].apply(json.dumps)
+    df.to_csv(fn,index=False)
+  else:
+    log.warn("Unrecognized file extension, will save as pickle")
+    fn = fn+".pkl"
+    df.to_pickle(fn)
+    
+  log.info(f"Exporting features for {len(df)} {inst} to '{fn}'.")
 
 def splitIntoSentences(df,tok,story_col,sent_col):
   if sent_col not in df:
     tqdm.pandas(desc="Tokenizing into sentences",ascii=True)
     df[sent_col] = df[story_col].progress_apply(
       lambda t: betterSentTokenization(t,tok.encode))
-  else:
-    print("Data already split into sentences.")
-    
-  print(df[sent_col].apply(len).describe())
   
   return df
+
+def meltFeaturesPerSentence(df,args):
+  cols = [args.sentence_column]+[
+    c for c in df.columns if c.split("_hist")[0] in SENT_FEAT_COLS]
+
+  if not args.story_id_column:
+    args.story_id_column = DEFAULT_STORY_ID_COL
+    df[args.story_id_column] = df.index
+    
+  data = {(r[args.story_id_column],sIx): {c: r[c][sIx] for c in cols}
+          for ix, r in df.iterrows()
+          for sIx,_ in enumerate(r[args.sentence_column])}
+  
+  df_long = pd.DataFrame.from_dict(data,orient="index")
+  df_long.index.names = [args.story_id_column, args.sentence_id_column]
+  df_long = df_long.reset_index()
+  
+  return df_long
 
 def main(args):
   df = loadInput(args)
@@ -219,21 +256,35 @@ def main(args):
 
   # Loading model
   model = AutoModelForCausalLM.from_pretrained(args.language_model)
-
-  embed();exit()
   
-  if not args.context_col:
-    args.context_col = "summary"
-    df[args.context_col] = ""
+  try:
+    max_seq_len = model.config.max_position_embeddings
+  except:
+    max_seq_len = MAX_SEQ_LEN
   
-  feats = computePplxInContext(
-    df,tok,model,story_col=args.column,context_col=args.context_col,
-    sent_col=args.sent_col,hist_size=args.hist_size,
-    max_seq_len=model.config.max_position_embeddings)
+  feat_list = {}
+  for h in tqdm(args.history_sizes,ascii=True,desc="History sizes"):
+    print(file=sys.stderr); sys.stderr.flush()
+    feats = computePplxInContext(
+      df,tokenizer,model, story_col=args.story_column,
+      context_col=args.context_column,
+      sent_col=args.sentence_column,hist_size=h,
+      max_seq_len=max_seq_len)
+    feats = feats.rename(columns={c: c+f"_hist{h}" for c in feats})
+    feat_list[h] = feats
+    print(file=sys.stderr); sys.stderr.flush()
+    
+  feats = pd.concat(feat_list.values(),axis=1)
   
-  df = pd.concat([df,feats],axis=1,sort=False)
-  df.to_pickle(args.output_file)
-  log.info(f"Exporting feats to {args.output_file}") 
+  df_out = pd.concat([df,feats],axis=1,sort=False)
+  if args.output_story_file:
+    saveOutput(df_out,args.output_story_file,"stories")
+    
+  if args.output_sentence_file:
+    df_long = meltFeaturesPerSentence(df_out,args)
+    saveOutput(df_long,args.output_sentence_file,"sentences")
+    
+  log.info("Done")
 
 
 if __name__=="__main__":
@@ -245,32 +296,44 @@ if __name__=="__main__":
   
   parser.add_argument("--output_sentence_file",
                       help="Output file with the linearity of each sentence per line.")
-  parser.add_argument("--output_aggregate_file",
+  parser.add_argument("--output_story_file",
                       help="Output file with linearity scores aggregated per story.")
+  
+  parser.add_argument("--story_column",default="story",
+                      help="Column for which to compute the linearity scores")
+  
+  parser.add_argument("--story_id_column",default="story_id",
+                      help="Story identifier (optional, defaults to 'story_id'; "
+                      "will assign automatically)")
+  parser.add_argument("--sentence_id_column",default="sentence_id",
+                      help="Sentence identifier (optional, defaults to 'sentence_id'; "
+                      "will assign automatically)")
   
   parser.add_argument("--context_column", default=None,
                       help="Column that contains the context or 'main event'. "
-                      "Optional; if ommitted, will use the empty string.")
-  
+                      "Optional; if ommitted, will use the empty string.")  
   parser.add_argument("--sentence_column",default="sents",
                       help="If text already split up into sentences. "
                       "This column should be a json list of words/tokens.")
+
   parser.add_argument("--history_sizes",nargs="+",type=int,default=[0, -1])
+
   parser.add_argument("--debug",type=int,default=0)
-  parser.add_argument("--story_column",default="story",
-                      help="Column for which to compute the linearity scores")
+
   parser.add_argument("--language_model",default="openai-gpt",
                       help="Which large LM to use to compute perplexity. Options include: "
                       "openai-gpt, gpt2, distilgpt2, transfo-xl, reformer.")
   
   args = parser.parse_args()
   
-  # if not args.input_file or not args.output_file:
-  #   parser.print_help()
-  #   exit(2)
+  if not args.output_story_file and not args.output_sentence_file:
+    parser.print_usage()
+    print()
+    raise ValueError("Please provide an output file: --output_story_file or --output_sentence_file")
+
     
   # if args.output_file.endswith(".csv"):
   #   raise ValueError("Please use a .pkl extension for the outputfile")
   
-  print(args)
+  log.info(args)
   main(args)
