@@ -209,6 +209,7 @@ def saveOutput(df,fn,inst="stories"):
   elif fn.endswith(".csv"):
     listsOrDicts = df.apply(lambda c: c.apply(
       lambda x: isinstance(x,list) or  isinstance(x,dict)).all())
+    df = df.copy()
     for c in df.columns[listsOrDicts]:
       df[c] = df[c].apply(json.dumps)
     df.to_csv(fn,index=False)
@@ -234,7 +235,7 @@ def meltFeaturesPerSentence(df,args):
   if not args.story_id_column:
     args.story_id_column = DEFAULT_STORY_ID_COL
     df[args.story_id_column] = df.index
-    
+  
   data = {(r[args.story_id_column],sIx): {c: r[c][sIx] for c in cols}
           for ix, r in df.iterrows()
           for sIx,_ in enumerate(r[args.sentence_column])}
