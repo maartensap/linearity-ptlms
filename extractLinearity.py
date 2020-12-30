@@ -60,7 +60,7 @@ def _computePplxInContext(tokens,index,model,tok,max_seq_len=MAX_SEQ_LEN):
     # assert index > 0
     
   with torch.no_grad():
-    input_ids = torch.tensor([tokens])
+    input_ids = torch.tensor([tokens]).to(model.device)
     out = model(input_ids)
     logits = out[0]
     
@@ -93,9 +93,11 @@ def computePplxInContext(df,tok,model,story_col="story",context_col="summary",
   """
 
   if context_col == "firstSent":
+    log.info("Using first sentence as context")
+    sents_backup = df[sent_col].copy()
     df[context_col] = df[sent_col].apply(lambda x: x[0])
     df[sent_col] = df[sent_col].apply(lambda x: x[1:])
-  
+    
   # Todo: make sure index is unique
   assert len({i for i in df.index}) == len(df), "df index isn't unique"
   dataD = {}
@@ -146,7 +148,11 @@ def computePplxInContext(df,tok,model,story_col="story",context_col="summary",
   # data.reset_index(level=1,inplace=True)
   feats = data.groupby(level=0).apply(reMergeXents)
   feats = feats.reindex(df.index)
-  
+
+  if context_col == "firstSent":
+    log.info("Resetting the sentences")
+    df[sent_col] = sents_backup
+    
   assert len(feats) == len(df)
   return feats
 
@@ -229,12 +235,22 @@ def splitIntoSentences(df,tok,story_col,sent_col):
   return df
 
 def meltFeaturesPerSentence(df,args):
-  cols = [args.sentence_column]+[
-    c for c in df.columns if c.split("_hist")[0] in SENT_FEAT_COLS]
+  sent_feat_cols = [c for c in df.columns if c.split("_hist")[0] in SENT_FEAT_COLS]
+  if args.context_column == "firstSent":
+    log.warn("Since the context is the 'firstSent', the first sentence will have NaN values")
+    # adding nan's to the feature columns
+    for c in sent_feat_cols:
+      if "perTextToken" in c:
+        df[c] = df[c].apply(lambda x: [[np.nan]] + x)
+      else:
+        df[c] = df[c].apply(lambda x: [np.nan] + x)
+      
+  cols = [args.sentence_column]+sent_feat_cols
 
   if not args.story_id_column:
     args.story_id_column = DEFAULT_STORY_ID_COL
     df[args.story_id_column] = df.index
+    
   
   data = {(r[args.story_id_column],sIx): {c: r[c][sIx] for c in cols}
           for ix, r in df.iterrows()
@@ -257,6 +273,7 @@ def main(args):
 
   # Loading model
   model = AutoModelForCausalLM.from_pretrained(args.language_model)
+  model = model.to(args.device)
   
   try:
     max_seq_len = model.config.max_position_embeddings
@@ -324,6 +341,8 @@ if __name__=="__main__":
   parser.add_argument("--language_model",default="openai-gpt",
                       help="Which large LM to use to compute perplexity. Options include: "
                       "openai-gpt, gpt2, distilgpt2, transfo-xl, reformer.")
+  
+  parser.add_argument("--device",default="cpu")
   
   args = parser.parse_args()
   
