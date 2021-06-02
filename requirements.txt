@@ -36,5 +36,5 @@ torchvision==0.6.1+cu92
 tqdm==4.48.0
 traitlets==4.3.3
 transformers==3.0.2
-urllib3==1.25.9
+urllib3==1.26.5
 wcwidth==0.2.5
