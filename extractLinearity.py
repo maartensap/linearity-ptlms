@@ -6,7 +6,7 @@ import sys, os
 import json
 import argparse
 from tqdm import tqdm
-
+from itertools import combinations
 from nltk.tokenize import sent_tokenize, word_tokenize
 import torch
 import logging
@@ -26,9 +26,9 @@ SENT_FEAT_COLS = ['text_xents', 'text_probs', 'perTextTokenLogPs']
 
 np.random.seed(seed=56)
 
-logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
-                    level=logging.INFO,datefmt='%Y-%m-%d %H:%M:%S')
-log = logging.getLogger(__name__)
+# logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
+#                     level=logging.INFO,datefmt='%Y-%m-%d %H:%M:%S')
+log = logging.getLogger(__file__)
 
 def betterSentTokenization(text,wTokenize=word_tokenize,m=2):
   """Sentence tokenization that makes sure there aren't any sentences
@@ -48,7 +48,6 @@ def betterSentTokenization(text,wTokenize=word_tokenize,m=2):
         except:
           sents = [sing]
   return sents
-
 
 def _computePplxInContext(tokens,index,model,tok,max_seq_len=MAX_SEQ_LEN):
   # Note: tokens[index:] is the target sentence
@@ -110,7 +109,9 @@ def computePplxInContext(df,tok,model,story_col="story",context_col="summary",
         "text": s
       }
   data = pd.DataFrame(dataD).T
-  data["contHist"] = data["cont"] + "\n\n" + data["hist"].apply(" ".join) + " "
+  data["contHist"] = data["cont"] + "\n\n" + data["hist"].apply(
+    lambda x: " ".join(x) + (" " if len(x) > 0 else ""))
+  data["contHist"] = data["contHist"].str.lstrip()
   
   tqdm.pandas(ascii=True,desc="Tokenizing context+history")
   data["contHist_toks"] = data["contHist"].progress_apply(tok.encode)
@@ -128,7 +129,9 @@ def computePplxInContext(df,tok,model,story_col="story",context_col="summary",
     lambda x: _computePplxInContext(*x,model,tok,max_seq_len=max_seq_len),axis=1)
   
   data["text_xent"] = -data["perTextTokenLogP"].apply(np.mean)
-
+  
+  # embed();exit()
+  
   data["text_prob"] = data["perTextTokenLogP"].apply(
     lambda x: np.exp(x)).apply(np.mean)
   # data[["perTextTokenLogP","text_xent"]] = data[["toks","text_ix"]].progress_apply(
@@ -190,15 +193,17 @@ def loadInput(args):
     log.info(f"Found {len(sent_df)} sentences.")
     if not args.story_id_column in sent_df:
       sent_df[args.story_id_column] = DEFAULT_STORY_ID_VALUE
-      
+
     # turn into a one story Dataframe
-    df = sent_df.groupby(args.story_id_column,as_index=False).agg(
-      {args.sentence_column:list})
+    aggDict = {args.sentence_column:list}
+    if args.context_column:
+      aggDict[args.context_column] = "first"
+    df = sent_df.groupby(args.story_id_column,as_index=False).agg(aggDict)
     df[args.story_column] = df[args.sentence_column].apply(" ".join)
-    
+
   else:
     raise ValueError("Please provide one of --input_story_file or --input_sentence_file")
-
+  
   if args.debug:
     df = df.sample(args.debug)
     log.info(f"[DEBUG] Sampling {args.debug} datapoints.")
@@ -234,7 +239,7 @@ def splitIntoSentences(df,tok,story_col,sent_col):
   
   return df
 
-def meltFeaturesPerSentence(df,args):
+def meltFeaturesPerSentence(df,args,story_level_cols=[]):
   sent_feat_cols = [c for c in df.columns if c.split("_hist")[0] in SENT_FEAT_COLS]
   if args.context_column == "firstSent":
     log.warn("Since the context is the 'firstSent', the first sentence will have NaN values")
@@ -259,10 +264,25 @@ def meltFeaturesPerSentence(df,args):
   df_long = pd.DataFrame.from_dict(data,orient="index")
   df_long.index.names = [args.story_id_column, args.sentence_id_column]
   df_long = df_long.reset_index()
-  
+  if story_level_cols:
+    story_level_cols = pd.Index(story_level_cols).difference(df_long.columns).tolist() + [args.story_id_column]
+    df_long = df_long.merge(df[story_level_cols],on=args.story_id_column)
+
   return df_long
 
+def computeDiffsPerSentence(feats,hist_sizes,col="text_xents_hist"):
+  # relevant column to subtract: text_xents_histH
+  hist_sizes_str = sorted(["Full" if h == -1 else str(h) for h in hist_sizes])
+
+  for b,c in combinations(hist_sizes_str,r=2):
+    b_ = b.replace("Full","-1")
+    c_ = c.replace("Full","-1")
+    feats[col+b+"Minus"+c] = feats[[col+b_,col+c_]].apply(
+      lambda x: np.array(x[0])-np.array(x[1]),axis=1)
+  return feats
+
 def main(args):
+  print(args)
   df = loadInput(args)
 
   # Load tokenizer
@@ -293,13 +313,16 @@ def main(args):
     print(file=sys.stderr); sys.stderr.flush()
     
   feats = pd.concat(feat_list.values(),axis=1)
+  if args.extract_diffs:
+    feats = computeDiffsPerSentence(feats,args.history_sizes)
   
   df_out = pd.concat([df,feats],axis=1,sort=False)
+  
   if args.output_story_file:
     saveOutput(df_out,args.output_story_file,"stories")
     
   if args.output_sentence_file:
-    df_long = meltFeaturesPerSentence(df_out,args)
+    df_long = meltFeaturesPerSentence(df_out,args,story_level_cols=df.columns.tolist())
     saveOutput(df_long,args.output_sentence_file,"sentences")
     
   log.info("Done")
@@ -341,7 +364,8 @@ if __name__=="__main__":
   parser.add_argument("--language_model",default="openai-gpt",
                       help="Which large LM to use to compute perplexity. Options include: "
                       "openai-gpt, gpt2, distilgpt2, transfo-xl, reformer.")
-  
+
+  parser.add_argument("--extract_diffs",action="store_true")
   parser.add_argument("--device",default="cpu")
   
   args = parser.parse_args()

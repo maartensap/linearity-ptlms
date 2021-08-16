@@ -54,6 +54,18 @@ The output file (`--output_story_file`) will contain the same columns as above, 
 ## Step 2: Running the analysis script
 _coming soon_
 
+## Running the GPT-3 script
+Here's an example command to run the GPT-3 extraction script:
+
+```
+m=davinci
+python extractGPT3contextuality.py --input_story_file hippoCorpusV2.sentSplits.pkl --history_sizes -1 0 1 --output_sentence_file hcV2.gpt3${m}.pplx.summCtxt.hist.-1.0.1.csv --output_story_file hcV2.gpt3${m}.pplx.summCtxt.hist.-1.0.1.pkl --gpt3_variant ${m} --context_col summary --story_id_column AssignmentId --sentence_col sent
+```
+
+Note, this requires the OpenAI python library:
+`pip install openai`
+and requires you to put your API key in the following file `~/.openai_key`
+
 ## Reference
 Please cite [our paper](https://homes.cs.washington.edu/~msap/pdfs/sap2020recollectionImagination.pdf):
 
