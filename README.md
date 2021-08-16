@@ -59,7 +59,7 @@ Here's an example command to run the GPT-3 extraction script:
 
 ```
 m=davinci
-python extractGPT3contextuality.py --input_story_file hippoCorpusV2.sentSplits.pkl --history_sizes -1 0 1 --output_sentence_file hcV2.gpt3${m}.pplx.summCtxt.hist.-1.0.1.csv --output_story_file hcV2.gpt3${m}.pplx.summCtxt.hist.-1.0.1.pkl --gpt3_variant ${m} --context_col summary --story_id_column AssignmentId --sentence_col sent
+python extractGPT3contextuality.py --input_story_file hippoCorpusV2.sentSplits.csv --history_sizes -1 0 1 --output_sentence_file hcV2.gpt3${m}.pplx.summCtxt.hist.-1.0.1.csv --output_story_file hcV2.gpt3${m}.pplx.summCtxt.hist.-1.0.1.pkl --gpt3_variant ${m} --context_col summary --story_id_column AssignmentId --sentence_col sent
 ```
 
 Note, this requires the OpenAI python library:
