@@ -167,6 +167,11 @@ def loadInput(args):
     log.info(f"Reading {args.input_story_file}")
     if args.input_story_file.endswith(".csv"):
       df = pd.read_csv(args.input_story_file)
+      try:
+        df[args.sentence_column] = df[args.sentence_column].apply(json.loads)
+      except:
+        print(f"Could not load the pre-split sentences in {args.sentence_column}, will re-split again.")
+      
     elif args.input_story_file.endswith(".pkl"):
       df = pd.read_pickle(args.input_story_file)
     elif args.input_story_file.endswith(".txt"):

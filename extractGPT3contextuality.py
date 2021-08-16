@@ -20,7 +20,7 @@ except:
   pass
 
 import openai
-openai.api_key = open("~/.openai_key").read().strip()
+openai.api_key = open(os.path.join(os.path.expanduser("~"),".openai_key")).read().strip()
 
 import requests
 tnlg_url = "https://turingnlg-uw.turingase.p.azurewebsites.net/freeform/inference?key=56016fb4788644839e2af13144e271fb-maarten"
@@ -178,10 +178,9 @@ def main(args):
   df = loadInput(args)
   print(df.shape)
 
-  # embed();exit()
-
   # Load tokenizer (GPT3 uses GPT2's tokenizer)
-  tokenizer = AutoTokenizer.from_pretrained("openai-gpt")
+  # will not be needed if the sentences are already there.
+  tokenizer = AutoTokenizer.from_pretrained("gpt2")
   
   # Parse into sentences
   df = splitIntoSentences(df,tokenizer,args.story_column,args.sentence_column)
