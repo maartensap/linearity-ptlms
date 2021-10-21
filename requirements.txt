@@ -10,7 +10,7 @@ attelo==0.3
 attrs==18.1.0
 aws-xray-sdk==0.95
 awscli==1.15.51
-Babel==2.6.0
+Babel==2.9.1
 backcall==0.1.0
 backports.csv==1.0.6
 backports.functools-lru-cache==1.5
