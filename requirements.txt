@@ -88,7 +88,7 @@ jaraco.functools==1.20
 jedi==0.12.1
 Jinja2==2.10
 jmespath==0.9.3
-joblib==0.14.0
+joblib==1.2.0
 jsondiff==1.1.1
 jsonnet==0.10.0
 jsonpickle==0.9.6
