@@ -21,7 +21,7 @@ boto3==1.7.50
 botocore==1.10.50
 bz2file==0.98
 cachetools==3.0.0
-certifi==2018.4.16
+certifi==2022.12.7
 cffi==1.11.2
 chardet==3.0.4
 charset-normalizer==2.0.4
