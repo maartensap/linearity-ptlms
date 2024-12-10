@@ -188,7 +188,7 @@ requests==2.26.0
 requests-oauthlib==1.0.0
 requests-toolbelt==0.8.0
 responses==0.9.0
-rsa==3.4.2
+rsa==4.7
 s3transfer==0.1.13
 sacremoses==0.0.43
 scikit-learn==0.19.1
