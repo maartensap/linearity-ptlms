@@ -59,7 +59,7 @@ feedparser==5.2.1
 filelock==3.0.12
 flaky==3.4.0
 Flask==0.12.1
-Flask-Cors==3.0.3
+Flask-Cors==3.0.9
 ftfy==5.4.1
 future==0.16.0
 gdown==3.12.0
